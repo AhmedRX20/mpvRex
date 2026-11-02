@@ -40,7 +40,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.ZeroCornerSize
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -57,7 +56,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -82,9 +80,9 @@ private const val DIM_ALPHA = 0.5f
 
 // Side panel (landscape) metrics
 private const val SIDE_PANEL_WIDTH_FRACTION = 0.42f
-private val SIDE_PANEL_MIN_WIDTH = 360.dp
+private val SIDE_PANEL_MIN_WIDTH = 420.dp
 private val SIDE_PANEL_MAX_WIDTH = 420.dp
-private val SIDE_PANEL_HANDLE_WIDTH = 22.dp
+private val SIDE_PANEL_HANDLE_WIDTH = 25.dp
 private const val SIDE_PANEL_SURFACE_ALPHA = 0.94f
 
 /**
@@ -196,15 +194,6 @@ private fun SidePanelSheet(
     }
   }
 
-  // Calculate content color based on surface color luminance
-  val defaultSurfaceColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = SIDE_PANEL_SURFACE_ALPHA)
-  val actualSurfaceColor = surfaceColor ?: defaultSurfaceColor
-  val contentColor = if (actualSurfaceColor.luminance() > 0.5f) {
-    Color.Black
-  } else {
-    Color.White
-  }
-
   // Force LTR for the frame so "End" is always the physical right edge.
   CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
     Box(
@@ -248,10 +237,11 @@ private fun SidePanelSheet(
             }.windowInsetsPadding(
               WindowInsets.systemBars
                 .union(WindowInsets.displayCutout)
-                .only(WindowInsetsSides.End),
+                .only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
             ).imePadding(),
         shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
-        color = actualSurfaceColor,
+        color = surfaceColor
+          ?: MaterialTheme.colorScheme.surfaceContainer.copy(alpha = SIDE_PANEL_SURFACE_ALPHA),
         tonalElevation = tonalElevation,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         content = {
@@ -259,41 +249,38 @@ private fun SidePanelSheet(
             enabled = anchoredDraggableState.targetValue == 0,
             onBack = dismissWithAnimation,
           )
-          // Provide the correct content color for all text inside the panel
-          CompositionLocalProvider(LocalContentColor provides contentColor) {
-            Row(modifier = Modifier.fillMaxSize()) {
-              // Drag handle on the panel's left edge: the only area that drags the panel away.
+          Row(modifier = Modifier.fillMaxSize()) {
+            // Drag handle on the panel's left edge: the only area that drags the panel away.
+            Box(
+              modifier =
+                Modifier
+                  .width(SIDE_PANEL_HANDLE_WIDTH)
+                  .fillMaxHeight()
+                  .anchoredDraggable(
+                    state = anchoredDraggableState,
+                    orientation = Orientation.Horizontal,
+                  ),
+              contentAlignment = Alignment.Center,
+            ) {
               Box(
                 modifier =
                   Modifier
-                    .width(SIDE_PANEL_HANDLE_WIDTH)
-                    .fillMaxHeight()
-                    .anchoredDraggable(
-                      state = anchoredDraggableState,
-                      orientation = Orientation.Horizontal,
+                    .size(width = 4.dp, height = 36.dp)
+                    .background(
+                      color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                      shape = xyz.mpv.rex.ui.theme.pillShape,
                     ),
-                contentAlignment = Alignment.Center,
-              ) {
-                Box(
-                  modifier =
-                    Modifier
-                      .size(width = 4.dp, height = 36.dp)
-                      .background(
-                        color = contentColor.copy(alpha = 0.4f),
-                        shape = xyz.mpv.rex.ui.theme.pillShape,
-                      ),
-                )
-              }
-              Box(
-                modifier =
-                  Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-              ) {
-                // Restore the app's real layout direction for the content (RTL for Arabic).
-                CompositionLocalProvider(LocalLayoutDirection provides contentLayoutDirection) {
-                  content()
-                }
+              )
+            }
+            Box(
+              modifier =
+                Modifier
+                  .weight(1f)
+                  .fillMaxHeight(),
+            ) {
+              // Restore the app's real layout direction for the content (RTL for Arabic).
+              CompositionLocalProvider(LocalLayoutDirection provides contentLayoutDirection) {
+                content()
               }
             }
           }
@@ -375,16 +362,6 @@ private fun BottomSheetLayout(
       }
     }
   }
-  
-  // Calculate content color for bottom sheet as well
-  val defaultSurfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
-  val actualSurfaceColor = surfaceColor ?: defaultSurfaceColor
-  val contentColor = if (actualSurfaceColor.luminance() > 0.5f) {
-    Color.Black
-  } else {
-    Color.White
-  }
-  
   Box(
     modifier =
       Modifier
@@ -433,30 +410,27 @@ private fun BottomSheetLayout(
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           ).imePadding(),
       shape = MaterialTheme.shapes.extraLargeIncreased.copy(bottomEnd = ZeroCornerSize, bottomStart = ZeroCornerSize),
-      color = actualSurfaceColor,
+      color = surfaceColor ?: MaterialTheme.colorScheme.surfaceContainerLow,
       tonalElevation = tonalElevation,
       content = {
         BackHandler(
           enabled = anchoredDraggableState.targetValue == 0,
           onBack = internalOnDismissRequest,
         )
-        // Provide the correct content color for all text inside the bottom sheet
-        CompositionLocalProvider(LocalContentColor provides contentColor) {
-          Column(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-              Box(
-                  modifier = Modifier
-                      .padding(vertical = 12.dp)
-                      .size(width = 36.dp, height = 4.dp)
-                      .background(
-                          color = contentColor.copy(alpha = 0.4f),
-                          shape = xyz.mpv.rex.ui.theme.pillShape
-                      )
-              )
-              content()
-          }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 12.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        shape = xyz.mpv.rex.ui.theme.pillShape
+                    )
+            )
+            content()
         }
       },
     )
