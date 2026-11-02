@@ -20,13 +20,14 @@ import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
@@ -41,6 +42,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -63,6 +65,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
@@ -79,11 +83,20 @@ private val sheetAnimationSpec = tween<Float>(350)
 private const val DIM_ALPHA = 0.5f
 
 // Side panel (landscape) metrics
-private const val SIDE_PANEL_WIDTH_FRACTION = 0.42f
-private val SIDE_PANEL_MIN_WIDTH = 420.dp
-private val SIDE_PANEL_MAX_WIDTH = 420.dp
-private val SIDE_PANEL_HANDLE_WIDTH = 25.dp
+/** Panel width. A smaller `customMaxWidth` from a call site wins; never more than 55% of the screen. */
+private val SIDE_PANEL_WIDTH = 400.dp
+private const val SIDE_PANEL_MAX_SCREEN_FRACTION = 0.55f
+private val SIDE_PANEL_HANDLE_WIDTH = 22.dp
+private val SIDE_PANEL_HANDLE_HEIGHT = 120.dp
+private val SIDE_PANEL_CONTENT_PADDING_TOP = 16.dp
+private val SIDE_PANEL_CONTENT_PADDING_BOTTOM = 12.dp
 private const val SIDE_PANEL_SURFACE_ALPHA = 0.94f
+
+/**
+ * Scales dp AND text inside the landscape panel. 1.0 = no change.
+ * Try 0.9 if the content still feels oversized (touch targets shrink by the same ratio).
+ */
+private const val SIDE_PANEL_CONTENT_SCALE = 1.0f
 
 /**
  * Adaptive container used by every in-player menu.
@@ -98,7 +111,8 @@ private const val SIDE_PANEL_SURFACE_ALPHA = 0.94f
  * whether to dim the video: `null` = automatic (dim in portrait, no dim in landscape so the user
  * can see the effect of a setting while changing it).
  *
- * Landscape dismissal: tap outside, system back, or drag the thin handle on the panel's left edge.
+ * The panel wraps its content, is 400-420dp wide and renders content slightly compact.
+ * Landscape dismissal: tap outside, system back, or drag the handle on the panel's left edge.
  * Dragging is deliberately limited to that handle so it never conflicts with horizontal pagers
  * (e.g. the tabs in MoreSheet) or sliders inside the content.
  */
@@ -156,15 +170,29 @@ private fun SidePanelSheet(
 ) {
   val scope = rememberCoroutineScope()
   val density = LocalDensity.current
+  val configuration = LocalConfiguration.current
   val contentLayoutDirection = LocalLayoutDirection.current
   val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
 
-  val upperWidth = customMaxWidth ?: SIDE_PANEL_MAX_WIDTH
-  val lowerWidth = if (SIDE_PANEL_MIN_WIDTH < upperWidth) SIDE_PANEL_MIN_WIDTH else upperWidth
-  val panelWidth =
-    (LocalConfiguration.current.screenWidthDp * SIDE_PANEL_WIDTH_FRACTION)
-      .dp
-      .coerceIn(lowerWidth, upperWidth)
+  val requestedWidth =
+    if (customMaxWidth != null && customMaxWidth < SIDE_PANEL_WIDTH) customMaxWidth else SIDE_PANEL_WIDTH
+  val panelWidth = requestedWidth.coerceAtMost(configuration.screenWidthDp.dp * SIDE_PANEL_MAX_SCREEN_FRACTION)
+  val panelMaxHeight = configuration.screenHeightDp.dp
+
+  // The surface colour is translucent, so Surface can't derive a content colour from it
+  // (it would fall back to LocalContentColor = black). Set it explicitly.
+  val containerColor =
+    surfaceColor ?: MaterialTheme.colorScheme.surfaceContainer.copy(alpha = SIDE_PANEL_SURFACE_ALPHA)
+  val onContainerColor =
+    if (surfaceColor != null) contentColorFor(surfaceColor) else MaterialTheme.colorScheme.onSurface
+
+  val scaledDensity =
+    remember(density) {
+      Density(
+        density = density.density * SIDE_PANEL_CONTENT_SCALE,
+        fontScale = density.fontScale * SIDE_PANEL_CONTENT_SCALE,
+      )
+    }
 
   var backgroundAlpha by remember { mutableFloatStateOf(0f) }
   val alpha by animateFloatAsState(
@@ -207,13 +235,13 @@ private fun SidePanelSheet(
             indication = null,
             onClick = dismissWithAnimation,
           ),
-      contentAlignment = Alignment.TopEnd,
+      contentAlignment = Alignment.CenterEnd,
     ) {
       Surface(
         modifier =
           Modifier
             .width(panelWidth)
-            .fillMaxHeight()
+            .heightIn(max = panelMaxHeight)
             .onSizeChanged {
               val anchors =
                 DraggableAnchors {
@@ -240,8 +268,8 @@ private fun SidePanelSheet(
                 .only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
             ).imePadding(),
         shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
-        color = surfaceColor
-          ?: MaterialTheme.colorScheme.surfaceContainer.copy(alpha = SIDE_PANEL_SURFACE_ALPHA),
+        color = containerColor,
+        contentColor = onContainerColor,
         tonalElevation = tonalElevation,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         content = {
@@ -249,13 +277,34 @@ private fun SidePanelSheet(
             enabled = anchoredDraggableState.targetValue == 0,
             onBack = dismissWithAnimation,
           )
-          Row(modifier = Modifier.fillMaxSize()) {
-            // Drag handle on the panel's left edge: the only area that drags the panel away.
+          Box {
+            // Content wraps its own height (up to the screen height), so short menus
+            // don't leave dead space below them.
+            Box(
+              modifier =
+                Modifier.padding(
+                  start = SIDE_PANEL_HANDLE_WIDTH,
+                  top = SIDE_PANEL_CONTENT_PADDING_TOP,
+                  bottom = SIDE_PANEL_CONTENT_PADDING_BOTTOM,
+                ),
+            ) {
+              // Restore the app's real layout direction (RTL for Arabic) for the content.
+              CompositionLocalProvider(
+                LocalLayoutDirection provides contentLayoutDirection,
+                LocalDensity provides scaledDensity,
+              ) {
+                content()
+              }
+            }
+
+            // Drag handle on the left edge: the only area that drags the panel away, so it
+            // never conflicts with horizontal pagers or sliders inside the content.
             Box(
               modifier =
                 Modifier
+                  .align(Alignment.CenterStart)
                   .width(SIDE_PANEL_HANDLE_WIDTH)
-                  .fillMaxHeight()
+                  .height(SIDE_PANEL_HANDLE_HEIGHT)
                   .anchoredDraggable(
                     state = anchoredDraggableState,
                     orientation = Orientation.Horizontal,
@@ -271,17 +320,6 @@ private fun SidePanelSheet(
                       shape = xyz.mpv.rex.ui.theme.pillShape,
                     ),
               )
-            }
-            Box(
-              modifier =
-                Modifier
-                  .weight(1f)
-                  .fillMaxHeight(),
-            ) {
-              // Restore the app's real layout direction for the content (RTL for Arabic).
-              CompositionLocalProvider(LocalLayoutDirection provides contentLayoutDirection) {
-                content()
-              }
             }
           }
         },
