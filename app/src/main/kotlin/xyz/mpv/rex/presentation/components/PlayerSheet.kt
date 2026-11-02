@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.rememberSplineBasedDecay
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableState
@@ -19,14 +20,13 @@ import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
@@ -36,11 +36,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -73,7 +76,32 @@ import kotlin.math.roundToInt
 
 private val sheetAnimationSpec = tween<Float>(350)
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+private const val DIM_ALPHA = 0.5f
+
+// Side panel (landscape) metrics
+private const val SIDE_PANEL_WIDTH_FRACTION = 0.42f
+private val SIDE_PANEL_MIN_WIDTH = 360.dp
+private val SIDE_PANEL_MAX_WIDTH = 420.dp
+private val SIDE_PANEL_HANDLE_WIDTH = 22.dp
+private const val SIDE_PANEL_SURFACE_ALPHA = 0.94f
+
+/**
+ * Adaptive container used by every in-player menu.
+ *
+ * - Portrait: classic bottom sheet (dimmed background, swipe down to dismiss).
+ * - Landscape: side panel pinned to the physical RIGHT edge of the screen, regardless of the
+ *   app language / layout direction (same convention as VLC, MX Player, etc.). The panel frame is
+ *   forced to LTR so it always slides in from the right, while the panel CONTENT keeps the
+ *   original layout direction, so Arabic text and icons stay correctly mirrored inside it.
+ *
+ * Call sites do not need to change. The optional [dimBackground] parameter lets a menu choose
+ * whether to dim the video: `null` = automatic (dim in portrait, no dim in landscape so the user
+ * can see the effect of a setting while changing it).
+ *
+ * Landscape dismissal: tap outside, system back, or drag the thin handle on the panel's left edge.
+ * Dragging is deliberately limited to that handle so it never conflicts with horizontal pagers
+ * (e.g. the tabs in MoreSheet) or sliders inside the content.
+ */
 @SuppressLint("ConfigurationScreenWidthHeight")
 @Composable
 fun PlayerSheet(
@@ -83,18 +111,222 @@ fun PlayerSheet(
   customMaxWidth: Dp? = null,
   customMaxHeight: Dp? = null,
   surfaceColor: Color? = null,
-  // Landscape: slide in from the screen's end edge (right in LTR, left in RTL) so the video stays visible.
-  // Portrait: keep the classic bottom sheet, a side panel would cover most of a phone-width screen.
-  asSideSheet: Boolean = LocalConfiguration.current.orientation == ORIENTATION_LANDSCAPE,
+  dimBackground: Boolean? = null,
+  content: @Composable () -> Unit,
+) {
+  val isLandscape = LocalConfiguration.current.orientation == ORIENTATION_LANDSCAPE
+  if (isLandscape) {
+    SidePanelSheet(
+      onDismissRequest = onDismissRequest,
+      modifier = modifier,
+      tonalElevation = tonalElevation,
+      customMaxWidth = customMaxWidth,
+      surfaceColor = surfaceColor,
+      dimBackground = dimBackground ?: false,
+      content = content,
+    )
+  } else {
+    BottomSheetLayout(
+      onDismissRequest = onDismissRequest,
+      modifier = modifier,
+      tonalElevation = tonalElevation,
+      customMaxWidth = customMaxWidth,
+      customMaxHeight = customMaxHeight,
+      surfaceColor = surfaceColor,
+      dimBackground = dimBackground ?: true,
+      content = content,
+    )
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Landscape: side panel pinned to the right edge
+// ---------------------------------------------------------------------------------------------
+
+@SuppressLint("ConfigurationScreenWidthHeight")
+@Composable
+private fun SidePanelSheet(
+  onDismissRequest: () -> Unit,
+  modifier: Modifier,
+  tonalElevation: Dp,
+  customMaxWidth: Dp?,
+  surfaceColor: Color?,
+  dimBackground: Boolean,
   content: @Composable () -> Unit,
 ) {
   val scope = rememberCoroutineScope()
   val density = LocalDensity.current
-  val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+  val contentLayoutDirection = LocalLayoutDirection.current
   val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
-  val maxWidth = customMaxWidth ?: when {
-    asSideSheet -> 400.dp
-    else -> 420.dp
+
+  val upperWidth = customMaxWidth ?: SIDE_PANEL_MAX_WIDTH
+  val lowerWidth = if (SIDE_PANEL_MIN_WIDTH < upperWidth) SIDE_PANEL_MIN_WIDTH else upperWidth
+  val panelWidth =
+    (LocalConfiguration.current.screenWidthDp * SIDE_PANEL_WIDTH_FRACTION)
+      .dp
+      .coerceIn(lowerWidth, upperWidth)
+
+  var backgroundAlpha by remember { mutableFloatStateOf(0f) }
+  val alpha by animateFloatAsState(
+    backgroundAlpha,
+    animationSpec = sheetAnimationSpec,
+    label = "alpha",
+  )
+
+  val decayAnimationSpec = rememberSplineBasedDecay<Float>()
+  val anchoredDraggableState =
+    remember {
+      AnchoredDraggableState(
+        initialValue = 1,
+        snapAnimationSpec = sheetAnimationSpec,
+        decayAnimationSpec = decayAnimationSpec,
+        positionalThreshold = { with(density) { 56.dp.toPx() } },
+        velocityThreshold = { with(density) { 125.dp.toPx() } },
+      )
+    }
+
+  val dismissWithAnimation: () -> Unit = {
+    if (anchoredDraggableState.currentValue == 0) {
+      scope.launch {
+        backgroundAlpha = 0f
+        anchoredDraggableState.animateTo(1)
+      }
+    }
+  }
+
+  // Force LTR for the frame so "End" is always the physical right edge.
+  CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+    Box(
+      modifier =
+        Modifier
+          .fillMaxSize()
+          .background(Color.Black.copy(alpha))
+          // Tap outside the panel closes it (transparent layer when dimming is off).
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = dismissWithAnimation,
+          ),
+      contentAlignment = Alignment.TopEnd,
+    ) {
+      Surface(
+        modifier =
+          Modifier
+            .width(panelWidth)
+            .fillMaxHeight()
+            .onSizeChanged {
+              val anchors =
+                DraggableAnchors {
+                  0 at 0f
+                  1 at it.width.toFloat()
+                }
+              anchoredDraggableState.updateAnchors(anchors)
+            }.clickable(
+              interactionSource = remember { MutableInteractionSource() },
+              indication = null,
+              onClick = {}, // swallow taps so they don't reach the dismiss layer
+            ).then(modifier)
+            .offset {
+              IntOffset(
+                anchoredDraggableState.offset
+                  .takeIf { it.isFinite() }
+                  ?.roundToInt()
+                  ?: 0,
+                0,
+              )
+            }.windowInsetsPadding(
+              WindowInsets.systemBars
+                .union(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
+            ).imePadding(),
+        shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
+        color = surfaceColor
+          ?: MaterialTheme.colorScheme.surfaceContainer.copy(alpha = SIDE_PANEL_SURFACE_ALPHA),
+        tonalElevation = tonalElevation,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        content = {
+          BackHandler(
+            enabled = anchoredDraggableState.targetValue == 0,
+            onBack = dismissWithAnimation,
+          )
+          Row(modifier = Modifier.fillMaxSize()) {
+            // Drag handle on the panel's left edge: the only area that drags the panel away.
+            Box(
+              modifier =
+                Modifier
+                  .width(SIDE_PANEL_HANDLE_WIDTH)
+                  .fillMaxHeight()
+                  .anchoredDraggable(
+                    state = anchoredDraggableState,
+                    orientation = Orientation.Horizontal,
+                  ),
+              contentAlignment = Alignment.Center,
+            ) {
+              Box(
+                modifier =
+                  Modifier
+                    .size(width = 4.dp, height = 36.dp)
+                    .background(
+                      color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                      shape = xyz.mpv.rex.ui.theme.pillShape,
+                    ),
+              )
+            }
+            Box(
+              modifier =
+                Modifier
+                  .weight(1f)
+                  .fillMaxHeight(),
+            ) {
+              // Restore the app's real layout direction for the content (RTL for Arabic).
+              CompositionLocalProvider(LocalLayoutDirection provides contentLayoutDirection) {
+                content()
+              }
+            }
+          }
+        },
+      )
+
+      LaunchedEffect(true) {
+        backgroundAlpha = if (dimBackground) DIM_ALPHA else 0f
+      }
+
+      LaunchedEffect(anchoredDraggableState) {
+        scope.launch { anchoredDraggableState.animateTo(0) }
+        snapshotFlow { anchoredDraggableState.currentValue }
+          .drop(1)
+          .filter { it == 1 }
+          .collectLatest { latestOnDismissRequest() }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Portrait: original bottom sheet (unchanged behavior)
+// ---------------------------------------------------------------------------------------------
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@SuppressLint("ConfigurationScreenWidthHeight")
+@Composable
+private fun BottomSheetLayout(
+  onDismissRequest: () -> Unit,
+  modifier: Modifier,
+  tonalElevation: Dp,
+  customMaxWidth: Dp?,
+  customMaxHeight: Dp?,
+  surfaceColor: Color?,
+  dimBackground: Boolean,
+  content: @Composable () -> Unit,
+) {
+  val scope = rememberCoroutineScope()
+  val density = LocalDensity.current
+  val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
+  val maxWidth = customMaxWidth ?:
+  if (LocalConfiguration.current.orientation == ORIENTATION_LANDSCAPE) {
+    640.dp
+  } else {
+    420.dp
   }
   val isImeVisible = WindowInsets.ime.getBottom(density) > 0
   val maxHeight = customMaxHeight ?: when {
@@ -140,68 +372,45 @@ fun PlayerSheet(
         ).fillMaxSize()
         .background(Color.Black.copy(alpha))
         .onSizeChanged {
-          // Distance to travel off-screen: the full height (bottom sheet) or the full width (side sheet).
-          val distance = if (asSideSheet) it.width.toFloat() else it.height.toFloat()
           val anchors =
             DraggableAnchors {
               0 at 0f
-              1 at distance
+              1 at it.height.toFloat()
             }
           anchoredDraggableState.updateAnchors(anchors)
         },
-    contentAlignment = if (asSideSheet) Alignment.CenterEnd else Alignment.BottomCenter,
+    contentAlignment = Alignment.BottomCenter,
   ) {
-    val nestedScrollConnection =
-      remember(anchoredDraggableState) {
-        anchoredDraggableState.preUpPostDownNestedScrollConnection()
-      }
-    val surfaceBase = surfaceColor ?: MaterialTheme.colorScheme.surfaceContainerLow
-
     Surface(
       modifier =
         Modifier
-          .then(
-            if (asSideSheet) {
-              Modifier.fillMaxHeight().sizeIn(maxWidth = maxWidth)
-            } else {
-              Modifier.sizeIn(maxWidth = maxWidth, maxHeight = maxHeight)
-            },
-          ).clickable(
+          .sizeIn(maxWidth = maxWidth, maxHeight = maxHeight)
+          .clickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
             onClick = {},
-          ).then(
-            // The vertical nested-scroll hand-off only makes sense for the bottom sheet.
-            if (asSideSheet) Modifier else Modifier.nestedScroll(nestedScrollConnection),
+          ).nestedScroll(
+            remember(anchoredDraggableState) {
+              anchoredDraggableState.preUpPostDownNestedScrollConnection()
+            },
           ).then(modifier)
           .offset {
-            // offset {} is layout-direction aware: a positive x moves toward the END edge,
-            // which is exactly the direction the side sheet leaves the screen in LTR and RTL.
-            val px = anchoredDraggableState.offset.takeIf { it.isFinite() }?.roundToInt() ?: 0
-            if (asSideSheet) IntOffset(px, 0) else IntOffset(0, px)
+            IntOffset(
+              0,
+              anchoredDraggableState.offset
+                .takeIf { it.isFinite() }
+                ?.roundToInt()
+                ?: 0,
+            )
           }.anchoredDraggable(
             state = anchoredDraggableState,
-            orientation = if (asSideSheet) Orientation.Horizontal else Orientation.Vertical,
-            // Dragging is in absolute screen coordinates, so flip it in RTL for the side sheet.
-            reverseDirection = asSideSheet && isRtl,
+            orientation = Orientation.Vertical,
           ).windowInsetsPadding(
-            if (asSideSheet) {
-              WindowInsets.systemBars
-                .union(WindowInsets.displayCutout)
-                .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
-            } else {
-              WindowInsets.systemBars
-                .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
-            },
+            WindowInsets.systemBars
+              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           ).imePadding(),
-      shape =
-        if (asSideSheet) {
-          MaterialTheme.shapes.extraLargeIncreased.copy(topEnd = ZeroCornerSize, bottomEnd = ZeroCornerSize)
-        } else {
-          MaterialTheme.shapes.extraLargeIncreased.copy(bottomEnd = ZeroCornerSize, bottomStart = ZeroCornerSize)
-        },
-      // Slightly translucent in side mode so the video still reads through the panel (glass look).
-      color = if (asSideSheet) surfaceBase.copy(alpha = 0.92f) else surfaceBase,
+      shape = MaterialTheme.shapes.extraLargeIncreased.copy(bottomEnd = ZeroCornerSize, bottomStart = ZeroCornerSize),
+      color = surfaceColor ?: MaterialTheme.colorScheme.surfaceContainerLow,
       tonalElevation = tonalElevation,
       content = {
         BackHandler(
@@ -212,27 +421,22 @@ fun PlayerSheet(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (asSideSheet) {
-              Spacer(modifier = Modifier.height(12.dp))
-            } else {
-              Box(
-                  modifier = Modifier
-                      .padding(vertical = 12.dp)
-                      .size(width = 36.dp, height = 4.dp)
-                      .background(
-                          color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                          shape = xyz.mpv.rex.ui.theme.pillShape
-                      )
-              )
-            }
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 12.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        shape = xyz.mpv.rex.ui.theme.pillShape
+                    )
+            )
             content()
         }
       },
     )
 
     LaunchedEffect(true) {
-      // Lighter scrim for the side sheet: the video should stay visible while you adjust things.
-      backgroundAlpha = if (asSideSheet) 0.25f else 0.5f
+      backgroundAlpha = if (dimBackground) DIM_ALPHA else 0f
     }
 
     LaunchedEffect(anchoredDraggableState) {
