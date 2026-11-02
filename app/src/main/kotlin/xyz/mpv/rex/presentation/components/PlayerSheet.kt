@@ -83,10 +83,10 @@ private const val DIM_ALPHA = 0.5f
 
 // Side panel (landscape) metrics
 /** Panel width. A smaller `customMaxWidth` from a call site wins; never more than 55% of the screen. */
-private val SIDE_PANEL_WIDTH = 400.dp
-private const val SIDE_PANEL_MAX_SCREEN_FRACTION = 0.55f
-private val SIDE_PANEL_HANDLE_WIDTH = 22.dp
-private val SIDE_PANEL_HANDLE_HEIGHT = 120.dp
+private val SIDE_PANEL_WIDTH = 420.dp
+private const val SIDE_PANEL_MAX_SCREEN_FRACTION = 0.60f
+private val SIDE_PANEL_HANDLE_WIDTH = 25.dp
+private val SIDE_PANEL_HANDLE_HEIGHT = 160.dp
 private val SIDE_PANEL_CONTENT_PADDING_TOP = 16.dp
 private val SIDE_PANEL_CONTENT_PADDING_BOTTOM = 12.dp
 private const val SIDE_PANEL_SURFACE_ALPHA = 0.94f
