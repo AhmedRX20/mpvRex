@@ -21,8 +21,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
@@ -31,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.material3.MaterialTheme
@@ -54,8 +59,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.collectLatest
@@ -76,16 +83,18 @@ fun PlayerSheet(
   customMaxWidth: Dp? = null,
   customMaxHeight: Dp? = null,
   surfaceColor: Color? = null,
+  // Landscape: slide in from the screen's end edge (right in LTR, left in RTL) so the video stays visible.
+  // Portrait: keep the classic bottom sheet, a side panel would cover most of a phone-width screen.
+  asSideSheet: Boolean = LocalConfiguration.current.orientation == ORIENTATION_LANDSCAPE,
   content: @Composable () -> Unit,
 ) {
   val scope = rememberCoroutineScope()
   val density = LocalDensity.current
+  val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
   val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
-  val maxWidth = customMaxWidth ?:
-  if (LocalConfiguration.current.orientation == ORIENTATION_LANDSCAPE) {
-    640.dp
-  } else {
-    420.dp
+  val maxWidth = customMaxWidth ?: when {
+    asSideSheet -> 400.dp
+    else -> 420.dp
   }
   val isImeVisible = WindowInsets.ime.getBottom(density) > 0
   val maxHeight = customMaxHeight ?: when {
@@ -131,45 +140,68 @@ fun PlayerSheet(
         ).fillMaxSize()
         .background(Color.Black.copy(alpha))
         .onSizeChanged {
+          // Distance to travel off-screen: the full height (bottom sheet) or the full width (side sheet).
+          val distance = if (asSideSheet) it.width.toFloat() else it.height.toFloat()
           val anchors =
             DraggableAnchors {
               0 at 0f
-              1 at it.height.toFloat()
+              1 at distance
             }
           anchoredDraggableState.updateAnchors(anchors)
         },
-    contentAlignment = Alignment.BottomCenter,
+    contentAlignment = if (asSideSheet) Alignment.CenterEnd else Alignment.BottomCenter,
   ) {
+    val nestedScrollConnection =
+      remember(anchoredDraggableState) {
+        anchoredDraggableState.preUpPostDownNestedScrollConnection()
+      }
+    val surfaceBase = surfaceColor ?: MaterialTheme.colorScheme.surfaceContainerLow
+
     Surface(
       modifier =
         Modifier
-          .sizeIn(maxWidth = maxWidth, maxHeight = maxHeight)
-          .clickable(
+          .then(
+            if (asSideSheet) {
+              Modifier.fillMaxHeight().sizeIn(maxWidth = maxWidth)
+            } else {
+              Modifier.sizeIn(maxWidth = maxWidth, maxHeight = maxHeight)
+            },
+          ).clickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
             onClick = {},
-          ).nestedScroll(
-            remember(anchoredDraggableState) {
-              anchoredDraggableState.preUpPostDownNestedScrollConnection()
-            },
+          ).then(
+            // The vertical nested-scroll hand-off only makes sense for the bottom sheet.
+            if (asSideSheet) Modifier else Modifier.nestedScroll(nestedScrollConnection),
           ).then(modifier)
           .offset {
-            IntOffset(
-              0,
-              anchoredDraggableState.offset
-                .takeIf { it.isFinite() }
-                ?.roundToInt()
-                ?: 0,
-            )
+            // offset {} is layout-direction aware: a positive x moves toward the END edge,
+            // which is exactly the direction the side sheet leaves the screen in LTR and RTL.
+            val px = anchoredDraggableState.offset.takeIf { it.isFinite() }?.roundToInt() ?: 0
+            if (asSideSheet) IntOffset(px, 0) else IntOffset(0, px)
           }.anchoredDraggable(
             state = anchoredDraggableState,
-            orientation = Orientation.Vertical,
+            orientation = if (asSideSheet) Orientation.Horizontal else Orientation.Vertical,
+            // Dragging is in absolute screen coordinates, so flip it in RTL for the side sheet.
+            reverseDirection = asSideSheet && isRtl,
           ).windowInsetsPadding(
-            WindowInsets.systemBars
-              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+            if (asSideSheet) {
+              WindowInsets.systemBars
+                .union(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
+            } else {
+              WindowInsets.systemBars
+                .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+            },
           ).imePadding(),
-      shape = MaterialTheme.shapes.extraLargeIncreased.copy(bottomEnd = ZeroCornerSize, bottomStart = ZeroCornerSize),
-      color = surfaceColor ?: MaterialTheme.colorScheme.surfaceContainerLow,
+      shape =
+        if (asSideSheet) {
+          MaterialTheme.shapes.extraLargeIncreased.copy(topEnd = ZeroCornerSize, bottomEnd = ZeroCornerSize)
+        } else {
+          MaterialTheme.shapes.extraLargeIncreased.copy(bottomEnd = ZeroCornerSize, bottomStart = ZeroCornerSize)
+        },
+      // Slightly translucent in side mode so the video still reads through the panel (glass look).
+      color = if (asSideSheet) surfaceBase.copy(alpha = 0.92f) else surfaceBase,
       tonalElevation = tonalElevation,
       content = {
         BackHandler(
@@ -180,22 +212,27 @@ fun PlayerSheet(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 12.dp)
-                    .size(width = 36.dp, height = 4.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                        shape = xyz.mpv.rex.ui.theme.pillShape
-                    )
-            )
+            if (asSideSheet) {
+              Spacer(modifier = Modifier.height(12.dp))
+            } else {
+              Box(
+                  modifier = Modifier
+                      .padding(vertical = 12.dp)
+                      .size(width = 36.dp, height = 4.dp)
+                      .background(
+                          color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                          shape = xyz.mpv.rex.ui.theme.pillShape
+                      )
+              )
+            }
             content()
         }
       },
     )
 
     LaunchedEffect(true) {
-      backgroundAlpha = 0.5f
+      // Lighter scrim for the side sheet: the video should stay visible while you adjust things.
+      backgroundAlpha = if (asSideSheet) 0.25f else 0.5f
     }
 
     LaunchedEffect(anchoredDraggableState) {
