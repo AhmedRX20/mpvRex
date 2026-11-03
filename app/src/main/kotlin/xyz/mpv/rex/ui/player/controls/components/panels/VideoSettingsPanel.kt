@@ -91,149 +91,38 @@ fun VideoSettingsPanel(
   onDismissRequest: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val configuration = LocalConfiguration.current
-  val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-
-  if (isPortrait) {
-    PlayerSheet(onDismissRequest = onDismissRequest) {
-      Column(
-        modifier = modifier
-          .fillMaxWidth()
-          .verticalScroll(rememberScrollState())
-          .padding(top = 4.dp),
-      ) {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = MaterialTheme.spacing.medium)
-            .padding(bottom = MaterialTheme.spacing.small),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-          Text(
-            text = stringResource(R.string.player_sheets_video_settings_title),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-          )
-          IconButton(onClick = onDismissRequest) {
-            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(24.dp))
-          }
-        }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-
-        Spacer(Modifier.height(MaterialTheme.spacing.small))
-
-        VideoSettingsContent()
-      }
-    }
-  } else {
-    VideoSettingsSideSheet(
-      onDismissRequest = onDismissRequest,
-      modifier = modifier,
-    )
-  }
-}
-
-@Composable
-private fun VideoSettingsSideSheet(
-  onDismissRequest: () -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  val scope = rememberCoroutineScope()
-  var isVisible by remember { mutableStateOf(false) }
-  val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
-
-  val scrimAlpha by animateFloatAsState(
-    targetValue = if (isVisible) 0.5f else 0f,
-    animationSpec = tween(durationMillis = 280),
-    label = "side_sheet_scrim",
-  )
-
-  val dismissWithAnimation: () -> Unit = {
-    scope.launch {
-      isVisible = false
-      delay(250)
-      latestOnDismissRequest()
-    }
-  }
-
-  BackHandler(enabled = isVisible, onBack = { dismissWithAnimation() })
-
-  LaunchedEffect(Unit) {
-    isVisible = true
-  }
-
-  Box(
-    modifier = Modifier
-      .fillMaxSize()
-      .background(Color.Black.copy(alpha = scrimAlpha))
-      .clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = { dismissWithAnimation() },
-      ),
-    contentAlignment = Alignment.CenterEnd,
-  ) {
-    AnimatedVisibility(
-      visible = isVisible,
-      enter = slideInHorizontally(
-        initialOffsetX = { fullWidth -> fullWidth },
-        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-      ) + fadeIn(animationSpec = tween(durationMillis = 200)),
-      exit = slideOutHorizontally(
-        targetOffsetX = { fullWidth -> fullWidth },
-        animationSpec = tween(durationMillis = 250, easing = FastOutLinearInEasing),
-      ) + fadeOut(animationSpec = tween(durationMillis = 200)),
+  // PlayerSheet adapts to the orientation by itself: bottom sheet in portrait,
+  // side panel pinned to the right edge in landscape.
+  PlayerSheet(onDismissRequest = onDismissRequest) {
+    Column(
+      modifier = modifier
+        .fillMaxWidth()
+        .verticalScroll(rememberScrollState())
+        .padding(top = 4.dp),
     ) {
-      Surface(
-        modifier = modifier
-          .clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null,
-            onClick = {}, // Prevent clicking through sheet to dismiss
-          )
-          .widthIn(max = 380.dp)
-          .fillMaxHeight()
-          .windowInsetsPadding(
-            WindowInsets.systemBars.only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
-          ),
-        shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 2.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = MaterialTheme.spacing.medium)
+          .padding(bottom = MaterialTheme.spacing.small),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
       ) {
-        Column(
-          modifier = Modifier
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState()),
-        ) {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(horizontal = MaterialTheme.spacing.medium)
-              .padding(top = MaterialTheme.spacing.medium, bottom = MaterialTheme.spacing.small),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-          ) {
-            Text(
-              text = stringResource(R.string.player_sheets_video_settings_title),
-              style = MaterialTheme.typography.titleLarge,
-              fontWeight = FontWeight.Bold,
-            )
-            IconButton(onClick = { dismissWithAnimation() }) {
-              Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(24.dp))
-            }
-          }
-
-          HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-
-          Spacer(Modifier.height(MaterialTheme.spacing.small))
-
-          VideoSettingsContent()
+        Text(
+          text = stringResource(R.string.player_sheets_video_settings_title),
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.Bold,
+        )
+        IconButton(onClick = onDismissRequest) {
+          Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(24.dp))
         }
       }
+
+      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+
+      Spacer(Modifier.height(MaterialTheme.spacing.small))
+
+      VideoSettingsContent()
     }
   }
 }
