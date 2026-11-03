@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -51,7 +52,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -218,6 +218,9 @@ fun FrameNavigationSheet(
   }
 }
 
+/** Below this width the info text and the four 56dp buttons don't fit on one row. */
+private val WIDE_LAYOUT_MIN_WIDTH = 480.dp
+
 @Composable
 private fun FrameNavigationContent(
   onPreviousFrame: () -> Unit,
@@ -236,9 +239,6 @@ private fun FrameNavigationContent(
   title: @Composable () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val configuration = LocalConfiguration.current
-  val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
-
   // Seekbar state management
   var userSliderPosition by remember { mutableFloatStateOf(0f) }
   var isSeeking by remember { mutableStateOf(false) }
@@ -300,8 +300,11 @@ private fun FrameNavigationContent(
         disabledContentColor = MaterialTheme.colorScheme.onPrimary,
       )
 
-    // Frame info, timestamp and navigation buttons
-    if (isLandscape) {
+    // Frame info, timestamp and navigation buttons.
+    // The layout is chosen by the width this sheet actually gets (the landscape side panel is
+    // only ~400dp wide), not by the screen orientation.
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+    if (maxWidth >= WIDE_LAYOUT_MIN_WIDTH) {
       FrameNavigationLandscape(
         currentFrame = currentFrame,
         totalFrames = totalFrames,
@@ -329,6 +332,7 @@ private fun FrameNavigationContent(
         isFrameStepping = isFrameStepping,
         buttonColors = buttonColors,
       )
+    }
     }
   }
 }
