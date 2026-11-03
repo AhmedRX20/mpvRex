@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
@@ -82,13 +81,17 @@ private val sheetAnimationSpec = tween<Float>(350)
 private const val DIM_ALPHA = 0.5f
 
 // Side panel (landscape) metrics
-/** Panel width. A smaller `customMaxWidth` from a call site wins; never more than 55% of the screen. */
-private val SIDE_PANEL_WIDTH = 420.dp
-private const val SIDE_PANEL_MAX_SCREEN_FRACTION = 0.60f
-private val SIDE_PANEL_HANDLE_WIDTH = 25.dp
-private val SIDE_PANEL_HANDLE_HEIGHT = 420.dp
-private val SIDE_PANEL_CONTENT_PADDING_TOP = 16.dp
-private val SIDE_PANEL_CONTENT_PADDING_BOTTOM = 12.dp
+/**
+ * Panel width (the content area ends up ~378dp after the handle strip, i.e. the same as the
+ * 380dp side panels the original author designed). A smaller `customMaxWidth` from a call site
+ * wins; never more than 55% of the screen.
+ */
+private val SIDE_PANEL_WIDTH = 400.dp
+private const val SIDE_PANEL_MAX_SCREEN_FRACTION = 0.55f
+private val SIDE_PANEL_HANDLE_WIDTH = 22.dp
+private val SIDE_PANEL_HANDLE_HEIGHT = 120.dp
+private val SIDE_PANEL_CONTENT_PADDING_TOP = 12.dp
+private val SIDE_PANEL_CONTENT_PADDING_BOTTOM = 8.dp
 private const val SIDE_PANEL_SURFACE_ALPHA = 0.94f
 
 /**
@@ -101,7 +104,7 @@ private const val SIDE_PANEL_CONTENT_SCALE = 1.0f
  * Adaptive container used by every in-player menu.
  *
  * - Portrait: classic bottom sheet (dimmed background, swipe down to dismiss).
- * - Landscape: side panel pinned to the physical RIGHT edge of the screen, regardless of the
+ * - Landscape: full-height side panel pinned to the physical RIGHT edge of the screen, regardless of the
  *   app language / layout direction (same convention as VLC, MX Player, etc.). The panel frame is
  *   forced to LTR so it always slides in from the right, while the panel CONTENT keeps the
  *   original layout direction, so Arabic text and icons stay correctly mirrored inside it.
@@ -176,7 +179,6 @@ private fun SidePanelSheet(
   val requestedWidth =
     if (customMaxWidth != null && customMaxWidth < SIDE_PANEL_WIDTH) customMaxWidth else SIDE_PANEL_WIDTH
   val panelWidth = requestedWidth.coerceAtMost(configuration.screenWidthDp.dp * SIDE_PANEL_MAX_SCREEN_FRACTION)
-  val panelMaxHeight = configuration.screenHeightDp.dp
 
   // The surface colour is translucent, so Surface can't derive a content colour from it
   // (it would fall back to LocalContentColor = black). Set it explicitly.
@@ -234,13 +236,13 @@ private fun SidePanelSheet(
             indication = null,
             onClick = dismissWithAnimation,
           ),
-      contentAlignment = Alignment.CenterEnd,
+      contentAlignment = Alignment.TopEnd,
     ) {
       Surface(
         modifier =
           Modifier
             .width(panelWidth)
-            .heightIn(max = panelMaxHeight)
+            .fillMaxHeight()
             .onSizeChanged {
               val anchors =
                 DraggableAnchors {
@@ -276,16 +278,20 @@ private fun SidePanelSheet(
             enabled = anchoredDraggableState.targetValue == 0,
             onBack = dismissWithAnimation,
           )
-          Box {
-            // Content wraps its own height (up to the screen height), so short menus
-            // don't leave dead space below them.
+          Box(modifier = Modifier.fillMaxSize()) {
+            // The panel always takes the full height. Content taller than the panel fills it
+            // (and scrolls on its own); short content sits centred vertically instead of
+            // hugging the top edge.
             Box(
               modifier =
-                Modifier.padding(
-                  start = SIDE_PANEL_HANDLE_WIDTH,
-                  top = SIDE_PANEL_CONTENT_PADDING_TOP,
-                  bottom = SIDE_PANEL_CONTENT_PADDING_BOTTOM,
-                ),
+                Modifier
+                  .fillMaxSize()
+                  .padding(
+                    start = SIDE_PANEL_HANDLE_WIDTH,
+                    top = SIDE_PANEL_CONTENT_PADDING_TOP,
+                    bottom = SIDE_PANEL_CONTENT_PADDING_BOTTOM,
+                  ),
+              contentAlignment = Alignment.Center,
             ) {
               // Restore the app's real layout direction (RTL for Arabic) for the content.
               CompositionLocalProvider(
